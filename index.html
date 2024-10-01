@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenLayers Map with Locate Me</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ol3/3.20.1/ol.css" type="text/css">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ol3/3.20.1/ol.js"></script>
+    <style>
+        /* General page style */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Open Sans', sans-serif;
+        }
+
+        /* Map container with full viewport height */
+        #map {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* Dropdown styling */
+        #doctor-select {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            padding: 10px;
+            font-size: 16px;
+        }
+
+        /* H2 heading styled and overlaid on the map */
+        h2 {
+            position: relative;
+        }
+
+        #info {
+            position: absolute;
+            top: 100px;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+            text-align: center;
+            margin: 0;
+            padding: 10px 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 8px;
+            font-family: 'Open Sans', sans-serif;
+            font-size: 18px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        #info a {
+            color: #007BFF;
+            text-decoration: none;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        #info a:hover {
+            text-decoration: underline;
+        }
+
+        /* Tooltip styling */
+        .ol-tooltip {
+            background-color: white; /* Change tooltip background to white */
+            border-radius: 5px;
+            padding: 10px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .ol-tooltip-table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        .ol-tooltip-table th,
+        .ol-tooltip-table td {
+            padding: 5px;
+            text-align: left;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+
+<div id="info">
+    <h2>ATS Milano: Medici & Pediatri liberi</h2>
+    <p>Questa mappa mostra i medici di famiglia con posti disponibili e utilizza l'API ufficiale dell'ATS Milano. L'originale su <a href="https://www.ats-milano.it/trova-medico">https://www.ats-milano.it/trova-medico</a> non mostra i colori. Per maggiori informazioni, fai riferimento alla fonte originale. Realizzato da <a href="https://www.linkedin.com/in/dominik-weckm%C3%BCller/">me</a>, source code disponibile su <a href="https://github.com/do-me/ats-milano-medici-map">GitHub</a>. <a id="show-my-location"><br>Mostra la mia posizione</a></p>
+    <!-- Dropdown to select doctor type -->
+    <select id="doctor-select">
+        <option selected value="MMG">Medici</option>
+        <option value="ALL">Medici & Paediatri</option>
+        <option value="PLS">Pediatri</option>
+    </select>
+</div>
+
+<div id="map"></div>
+
+<script>
+    // Initial API URL based on default selection
+    const apiUrls = {
+        ALL: "https://corsproxy.io/?https://www.ats-milano.it/api/trova-medico?nw=&se=&nome=&codice_medico=&tipo_medico=ALL&asst=&ambito=&comune=",
+        MMG: "https://corsproxy.io/?https://www.ats-milano.it/api/trova-medico?nw=&se=&nome=&codice_medico=&tipo_medico=MMG&asst=&ambito=&comune=",
+        PLS: "https://corsproxy.io/?https://www.ats-milano.it/api/trova-medico?nw=&se=&nome=&codice_medico=&tipo_medico=PLS&asst=&ambito=&comune="
+    };
+
+    let currentLayer;
+
+    // Function to get color based on "semaforo" value
+    function getColor(semaforo) {
+        semaforo = semaforo.trim();
+        switch (semaforo) {
+            case 'verde':
+                return 'green';
+            case 'rosso':
+                return 'red';
+            case 'giallo':
+                return 'yellow';
+            case 'nero':
+                return 'black';
+            default:
+                console.log(`"${semaforo}"`); // Log the unrecognized color
+                return 'gray'; // Fallback color
+        }
+    }
+
+    // Initialize the map
+    const map = new ol.Map({
+        target: 'map',
+        layers: [
+            new ol.layer.Tile({
+                source: new ol.source.XYZ({
+                    url: 'https://{a-c}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                    attributions: '© <a href="https://carto.com/attributions">CARTO</a>'
+                })
+            })
+        ],
+        view: new ol.View({
+            center: ol.proj.fromLonLat([9.19, 45.46]), // Centered around Milano
+            zoom: 12
+        })
+    });
+
+    // Handle "Mostra la mia posizione" click
+    const showMyLocationLink = document.getElementById('show-my-location');
+    showMyLocationLink.addEventListener('click', function() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(function(position) {
+                const coords = [position.coords.longitude, position.coords.latitude];
+                const userLocation = ol.proj.fromLonLat(coords);
+
+                // Fly to user location
+                map.getView().animate({
+                    center: userLocation,
+                    duration: 700,
+                    zoom: 14
+                });
+
+                // Add user location pin with custom icon
+                const userIcon = new ol.style.Style({
+                    image: new ol.style.Icon({
+                        anchor: [0.5, 1],
+                        src: 'https://cdn-icons-png.flaticon.com/512/64/64096.png', // User icon URL
+                        scale: 0.05
+                    })
+                });
+
+                const userFeature = new ol.Feature({
+                    geometry: new ol.geom.Point(userLocation)
+                });
+                userFeature.setStyle(userIcon);
+
+                // Create or update user layer (don't remove other layers)
+                let userLayer = map.getLayers().getArray().find(layer => layer.get('name') === 'userLayer');
+                if (!userLayer) {
+                    const vectorSource = new ol.source.Vector({
+                        features: [userFeature]
+                    });
+                    userLayer = new ol.layer.Vector({
+                        source: vectorSource,
+                        name: 'userLayer'
+                    });
+                    map.addLayer(userLayer);
+                } else {
+                    userLayer.getSource().clear();
+                    userLayer.getSource().addFeature(userFeature);
+                }
+
+            }, function() {
+                alert("Unable to retrieve your location.");
+            });
+        } else {
+            alert("Geolocation is not supported by this browser.");
+        }
+    });
+
+    // Function to create points on the map from the medico data
+    function addMedicoPoints(medicoData) {
+        // Clear existing points
+        if (currentLayer) {
+            map.removeLayer(currentLayer);
+        }
+
+        const vectorSource = new ol.source.Vector();
+
+        medicoData.forEach(function (medico) {
+            const feature = new ol.Feature({
+                geometry: new ol.geom.Point(ol.proj.fromLonLat([parseFloat(medico.lng), parseFloat(medico.lat)])),
+                data: medico
+            });
+
+            const style = new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 7,
+                    fill: new ol.style.Fill({ color: getColor(medico.semaforo) }),
+                    stroke: new ol.style.Stroke({
+                        color: '#fff',
+                        width: 1
+                    })
+                })
+            });
+            feature.setStyle(style);
+            vectorSource.addFeature(feature);
+        });
+
+        currentLayer = new ol.layer.Vector({
+            source: vectorSource
+        });
+
+        map.addLayer(currentLayer);
+
+        // Tooltip overlay
+        const tooltipElement = document.createElement('div');
+        tooltipElement.className = 'ol-tooltip';
+        const tooltipOverlay = new ol.Overlay({
+            element: tooltipElement,
+            offset: [10, -40],
+            positioning: 'bottom-left',
+            stopEvent: true,
+            autoPan: true
+        });
+        map.addOverlay(tooltipOverlay);
+
+        // Function to create an HTML table from JSON
+        function createTooltipTable(data) {
+            return `
+            <table class="ol-tooltip-table">
+                <tr><th>ID Medico</th><td>${data.idMedico}</td></tr>
+                <tr><th>Nome</th><td>${data.nomeMedico} ${data.cognomeMedico}</td></tr>
+                <tr><th>Codice Medico</th><td>${data.codiceMedico}</td></tr>
+                <tr><th>Data di Nascita</th><td>${new Date(data.dataNascita).toLocaleDateString()}</td></tr>
+                <tr><th>Tipo Medico</th><td>${data.tipoMedico}</td></tr>
+                <tr><th>Attivo</th><td>${data.attivo ? 'Sì' : 'No'}</td></tr>
+                <tr><th>Ambulatorio</th><td>${data.ambulatorioKey}</td></tr>
+                <tr><th>Comune</th><td>${data.comune}</td></tr>
+                <tr><th>Provincia</th><td>${data.provincia}</td></tr>
+                <tr><th>Semaforo</th><td>${data.semaforo}</td></tr>
+            </table>`;
+        }
+
+        // Add click event listener
+        map.on('singleclick', function (evt) {
+            const feature = map.forEachFeatureAtPixel(evt.pixel, function (feature) {
+                return feature;
+            });
+
+            if (feature) {
+                const medicoData = feature.get('data');
+                const tooltipContent = createTooltipTable(medicoData);
+                tooltipElement.innerHTML = tooltipContent;
+                tooltipOverlay.setPosition(evt.coordinate);
+                tooltipElement.style.display = 'block';
+            } else {
+                tooltipElement.style.display = 'none';
+            }
+        });
+    }
+
+    // Function to fetch data based on selected doctor type
+    function fetchMedicoData(type) {
+        const url = apiUrls[type];
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                addMedicoPoints(data);
+            })
+            .catch(error => {
+                console.error("Error fetching data:", error);
+            });
+    }
+
+    // Event listener for dropdown changes
+    const doctorSelect = document.getElementById('doctor-select');
+
+    // Initial load
+    fetchMedicoData(doctorSelect.value);
+
+    doctorSelect.addEventListener('change', function() {
+        const selectedType = this.value;
+        fetchMedicoData(selectedType);
+    });
+
+</script>
+
+</body>
+</html>
